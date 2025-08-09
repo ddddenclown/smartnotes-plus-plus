@@ -69,3 +69,59 @@ def delete_note(canvas_id: str, note_id: str) -> bool:
         return False
     save_notes(canvas_id, new_notes)
     return True
+
+
+def update_note_positions(canvas_id: str, position_updates: list) -> int:
+    """Обновить позиции нескольких заметок одновременно"""
+    notes = load_notes(canvas_id)
+    updated_count = 0
+    
+    # Создаем словарь для быстрого поиска обновлений по ID
+    # Обрабатываем как Pydantic объекты, так и словари
+    updates_dict = {}
+    for update in position_updates:
+        if hasattr(update, 'id'):  # Pydantic объект
+            updates_dict[update.id] = {"x": update.x, "y": update.y}
+        else:  # Словарь
+            updates_dict[update["id"]] = {"x": update["x"], "y": update["y"]}
+    
+    for i, note in enumerate(notes):
+        if note["id"] in updates_dict:
+            update = updates_dict[note["id"]]
+            notes[i]["x"] = update["x"]
+            notes[i]["y"] = update["y"]
+            notes[i]["updated_at"] = datetime.utcnow().isoformat()
+            updated_count += 1
+    
+    if updated_count > 0:
+        save_notes(canvas_id, notes)
+    
+    return updated_count
+
+
+def update_note_sizes(canvas_id: str, size_updates: list) -> int:
+    """Обновить размеры нескольких заметок одновременно"""
+    notes = load_notes(canvas_id)
+    updated_count = 0
+    
+    # Создаем словарь для быстрого поиска обновлений по ID
+    # Обрабатываем как Pydantic объекты, так и словари
+    updates_dict = {}
+    for update in size_updates:
+        if hasattr(update, 'id'):  # Pydantic объект
+            updates_dict[update.id] = {"width": update.width, "height": update.height}
+        else:  # Словарь
+            updates_dict[update["id"]] = {"width": update["width"], "height": update["height"]}
+    
+    for i, note in enumerate(notes):
+        if note["id"] in updates_dict:
+            update = updates_dict[note["id"]]
+            notes[i]["width"] = update["width"]
+            notes[i]["height"] = update["height"]
+            notes[i]["updated_at"] = datetime.utcnow().isoformat()
+            updated_count += 1
+    
+    if updated_count > 0:
+        save_notes(canvas_id, notes)
+    
+    return updated_count

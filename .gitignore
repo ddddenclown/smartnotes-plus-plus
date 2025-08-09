@@ -6,3 +6,4 @@ __pycache__/
 *.env
 models_vosk/
 ffmpeg-7.1.1-essentials_build/
+node_modules/

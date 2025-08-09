@@ -6,6 +6,8 @@ from datetime import datetime
 class BaseNoteFields(BaseModel):
     x: float
     y: float
+    width: Optional[float] = 200.0
+    height: Optional[float] = 150.0
     tags: Optional[List[str]] = []
 
 

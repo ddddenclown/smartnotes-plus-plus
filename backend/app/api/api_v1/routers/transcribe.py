@@ -7,8 +7,10 @@ from vosk import Model, KaldiRecognizer
 import wave
 import tempfile
 import subprocess
+from pydantic import BaseModel
 
 from backend.app.api.api_v1.deps import get_canvas_path
+from backend.app.services.cache import file_cache
 
 
 router = APIRouter()
@@ -20,6 +22,11 @@ MODELS = {
 }
 
 FFMPEG_PATH = r"C:\Users\Дмитрий\PycharmProjects\smartnotes-plus-plus\ffmpeg-7.1.1-essentials_build\bin\ffmpeg.exe"
+
+
+class TranscribeExistingRequest(BaseModel):
+    file_path: str
+    lang: str = "en-us"
 
 
 def convert_to_wav(input_path: Path, output_path: Path):
@@ -115,3 +122,89 @@ async def transcribe_audio(
     transcript_path.write_text(result_text.strip(), encoding="utf-8")
 
     return {"transcript": result_text.strip()}
+
+
+@router.post("/{canvas_id}/transcribe-existing")
+async def transcribe_existing_audio(canvas_id: str, request: TranscribeExistingRequest):
+    """Транскрипция для существующего аудио файла"""
+    if request.lang not in MODELS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported language"
+        )
+
+    canvas_dir = get_canvas_path(canvas_id)
+    audio_path = canvas_dir / request.file_path
+    
+    if not audio_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Audio file not found"
+        )
+
+    # Проверяем кеш
+    cached_transcript = file_cache.get_transcript_result(audio_path, request.lang)
+    if cached_transcript is not None:
+        return {"transcript": cached_transcript, "from_cache": True}
+
+    transcripts_dir = canvas_dir / "transcripts"
+    transcripts_dir.mkdir(parents=True, exist_ok=True)
+
+    # Конвертируем в WAV если нужно
+    if audio_path.suffix.lower() != '.wav':
+        wav_path = transcripts_dir / f"{audio_path.stem}_temp.wav"
+        try:
+            convert_to_wav(audio_path, wav_path)
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Audio conversion error: {e}"
+            )
+    else:
+        wav_path = audio_path
+
+    try:
+        wf = wave.open(str(wav_path), "rb")
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid audio file"
+        )
+
+    try:
+        model_path = MODELS[request.lang]
+        model = Model(model_path)
+        rec = KaldiRecognizer(model, wf.getframerate())
+        result_text = ""
+
+        while True:
+            data = wf.readframes(4000)
+            if len(data) == 0:
+                break
+            if rec.AcceptWaveform(data):
+                res = json.loads(rec.Result())
+                result_text += res.get("text", "") + " "
+        final_res = json.loads(rec.FinalResult())
+        result_text += final_res.get("text", "")
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Speech recognition error: {e}"
+        )
+    finally:
+        wf.close()
+        # Удаляем временный файл если создавали
+        if wav_path != audio_path and wav_path.exists():
+            wav_path.unlink()
+
+    result_text = result_text.strip()
+    
+    # Сохраняем в кеш
+    file_cache.set_transcript_result(audio_path, request.lang, result_text)
+
+    # Сохраняем транскрипт в файл
+    transcript_path = transcripts_dir / f"{audio_path.stem}_transcript.txt"
+    transcript_path.write_text(result_text, encoding="utf-8")
+
+    return {"transcript": result_text, "from_cache": False}
